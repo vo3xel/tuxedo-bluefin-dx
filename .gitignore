@@ -1,15 +1,6 @@
-# macOS
 .DS_Store
-
-# Editor / IDE
-.vscode/
-.idea/
-*.swp
-
-# Env / secrets
-.env
-.env.*
-*.local
-
-# Logs
-*.log
+cosign.key
+_build_*
+output
+_build-*/**
+*_chunkah_*

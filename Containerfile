@@ -11,7 +11,7 @@ FROM ghcr.io/ublue-os/bluefin-dx:stable
 ## images /opt is normally a symlink to /var/opt (mutable, NOT part of the image),
 ## which would wipe TCC on deployment. Making /opt a real directory bakes TCC into
 ## the image. See the note in ublue-os/image-template.
-RUN rm /opt && mkdir /opt
+RUN if [ -L /opt ]; then rm /opt && mkdir /opt; fi
 
 ### MODIFICATIONS
 ## All package installs and customizations happen in build_files/build.sh

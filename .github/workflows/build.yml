@@ -67,12 +67,21 @@ jobs:
           echo "IMAGE_NAME=${IMAGE_NAME,,}" >> ${GITHUB_ENV}
 
       # This actually builds the container image
+      # On failure, the tail of the build log is published to the run summary
+      # (visible without authentication) to make CI failures diagnosable.
       - name: Build Image
         id: build-image
         run: |
+          set -o pipefail
           sudo -E $(command -v just) build \
             ${IMAGE_NAME} \
-            ${DEFAULT_TAG}
+            ${DEFAULT_TAG} 2>&1 | tee /tmp/full-build.log || {
+              echo "## Build failed — last 200 lines of build log" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              tail -200 /tmp/full-build.log >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              exit 1
+            }
 
       # This is optional, this provides smaller delta updates
       - name: Rechunk with rpm-ostree

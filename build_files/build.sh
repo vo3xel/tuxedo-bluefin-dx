@@ -29,6 +29,9 @@ dnf5 -y install "kernel-devel-${KERNEL_VERSION}"
 # udev-hid-bpf) without scriptlets, then build explicitly for the image
 # kernel below.
 dnf5 -y download --destdir=/tmp/td-rpms --resolve tuxedo-drivers
+# Import TUXEDO's GPG key first so the direct rpm install verifies the
+# package signature instead of warning NOKEY.
+rpm --import "https://rpm.tuxedocomputers.com/fedora/${RELEASE}/0x54840598.pub.asc"
 rpm -ivh --noscripts /tmp/td-rpms/*.rpm
 
 TD_VERSION="$(rpm -q tuxedo-drivers --queryformat '%{VERSION}')"
@@ -97,4 +100,12 @@ systemctl enable tccd-sleep.service
 # bootc lint flags content in runtime-only and machine-local directories:
 # dnf state, and dkms bookkeeping (incl. an ephemeral auto-generated MOK
 # key). The built modules live in /usr/lib/modules and are unaffected.
-rm -rf /run/* /var/lib/dkms /var/lib/dnf || true
+# (/run/dnf specifically — /run/* would try to delete podman's bind-mounted
+# resolv.conf and just make noise.)
+rm -rf /run/dnf /var/lib/dkms /var/lib/dnf || true
+
+# A package scriptlet regenerates an initramfs into /boot during the build.
+# bootc ignores /boot content from the container (the real initramfs lives
+# in /usr/lib/modules/<kver>/initramfs.img) — this is pure image bloat and
+# a bootc lint warning.
+rm -f /boot/initramfs-*.img

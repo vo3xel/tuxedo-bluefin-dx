@@ -65,16 +65,36 @@ dnf5 -y install tuxedo-control-center
 # --skip-unavailable keeps F42 builds working where the package doesn't exist.
 dnf5 -y install --skip-unavailable tuxedo-firmware-collection
 
+# TCC's %post copies polkit policies out of its /opt payload and is flaky in
+# container builds (observed: a missing tomte.policy tripped up the copy).
+# Make sure every policy that shipped actually lands, then verify.
+TCC_DIST="/opt/tuxedo-control-center/resources/dist/tuxedo-control-center/data/dist-data"
+if [ -d "${TCC_DIST}" ]; then
+    for p in "${TCC_DIST}"/*.policy; do
+        [ -e "${p}" ] || continue
+        install -Dm644 "${p}" "/usr/share/polkit-1/actions/$(basename "${p}")"
+    done
+fi
+echo "TUXEDO polkit policies installed:"
+ls /usr/share/polkit-1/actions/ | grep -i tuxedo || true
+if ! ls /usr/share/polkit-1/actions/*tuxedo* >/dev/null 2>&1; then
+    echo "ERROR: no TUXEDO polkit policy installed — TCC GUI could not authenticate" >&2
+    exit 1
+fi
+
 systemctl enable tccd.service
 systemctl enable tccd-sleep.service
 
 ###############################################################################
-# 3. Cleanup: drop kernel build tooling from the final image
+# 3. Cleanup: build-time residue only
+#
+# Deliberately NO `dnf5 remove kernel-devel` here: dnf5's unused-dependency
+# autoremoval cascades into base-image packages (observed: it ripped out
+# v4l2loopback, the libguestfs stack, dhcpcd, ...). Keeping the build
+# tooling (~100 MB) is the safer trade on a ~5 GB image.
 ###############################################################################
 
-# Only kernel-devel is removed: dkms stays because the tuxedo-drivers RPM
-# (udev rules, firmware configs, module sources) depends on it. The dkms
-# bookkeeping under /var/lib/dkms does not survive into the deployed system
-# anyway — the built modules live in /usr/lib/modules and do.
-dnf5 -y remove "kernel-devel-${KERNEL_VERSION}" || \
-    echo "WARN: cleanup removal failed, continuing (image just carries extra packages)"
+# bootc lint flags content in runtime-only and machine-local directories:
+# dnf state, and dkms bookkeeping (incl. an ephemeral auto-generated MOK
+# key). The built modules live in /usr/lib/modules and are unaffected.
+rm -rf /run/* /var/lib/dkms /var/lib/dnf || true

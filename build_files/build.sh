@@ -86,15 +86,20 @@ if [ -f "${MOK_KEY}" ]; then
             # -f on xz/zstd: module files can be hard-linked; force breaks
             # the link instead of aborting the build
             case "${mod}" in
+                # Recompress with the kernel's own modinst settings: the
+                # in-kernel decompressor (CONFIG_MODULE_DECOMPRESS) only
+                # accepts xz CRC32 — plain `xz` defaults to CRC64, which
+                # userspace modinfo reads fine but finit_module rejects
+                # with a bare EINVAL.
                 *.ko.xz)
                     xz -df "${mod}"
                     "${SIGN_FILE}" sha256 "${MOK_KEY}" "${MOK_CRT}" "${mod%.xz}"
-                    xz -f "${mod%.xz}"
+                    xz -f --check=crc32 --lzma2=dict=1MiB "${mod%.xz}"
                     ;;
                 *.ko.zst)
                     zstd -qdf --rm "${mod}"
                     "${SIGN_FILE}" sha256 "${MOK_KEY}" "${MOK_CRT}" "${mod%.zst}"
-                    zstd -q -19 --rm -f "${mod%.zst}"
+                    zstd -q -T0 --rm -f "${mod%.zst}"
                     ;;
                 *.ko)
                     "${SIGN_FILE}" sha256 "${MOK_KEY}" "${MOK_CRT}" "${mod}"
@@ -102,6 +107,16 @@ if [ -f "${MOK_KEY}" ]; then
             esac
         done < <(find "/usr/lib/modules/${KERNEL_VERSION}/extra" -name "${base}.ko*" -print0)
     done
+
+    # Hard gate: any xz-compressed tuxedo module must use CRC32 — modinfo
+    # can't catch this (userspace liblzma reads CRC64 fine, the kernel
+    # decompressor doesn't and finit_module fails with bare EINVAL).
+    while IFS= read -r -d '' mod; do
+        if ! xz -lv "${mod}" | grep -q 'Check:.*CRC32'; then
+            echo "ERROR: ${mod} not compressed with CRC32 check — kernel cannot load it" >&2
+            exit 1
+        fi
+    done < <(find "/usr/lib/modules/${KERNEL_VERSION}/extra" -name '*tuxedo*.ko.xz' -print0)
 
     # Hard gate: the kernel must see our signature on tuxedo_io
     SIGNER="$(modinfo -k "${KERNEL_VERSION}" -F signer tuxedo_io 2>/dev/null || true)"

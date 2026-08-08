@@ -80,6 +80,13 @@ jobs:
               echo '```' >> $GITHUB_STEP_SUMMARY
               tail -200 /tmp/full-build.log >> $GITHUB_STEP_SUMMARY
               echo '```' >> $GITHUB_STEP_SUMMARY
+              # Annotations are visible without authentication (unlike logs and
+              # step summaries), so publish the error context there as well.
+              esc() { sed 's/%/%25/g' | tr -d '\r' | sed ':a;N;$!ba;s/\n/%0A/g'; }
+              MSG1=$(grep -inE 'error|fatal|no match|conflict|cannot|unable' /tmp/full-build.log | head -20 | cut -c1-180 | esc)
+              MSG2=$(tail -18 /tmp/full-build.log | cut -c1-180 | esc)
+              echo "::error title=build log error lines::${MSG1:0:3800}"
+              echo "::error title=build log tail::${MSG2:0:3800}"
               exit 1
             }
 

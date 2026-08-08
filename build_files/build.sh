@@ -71,24 +71,37 @@ install -Dm644 /ctx/mok/mok.der /usr/share/tuxedo-bluefin-dx/mok.der
 
 if [ -f "${MOK_KEY}" ]; then
     echo "Signing tuxedo modules with project MOK"
-    while IFS= read -r -d '' mod; do
-        case "${mod}" in
-            *.ko.xz)
-                xz -d "${mod}"
-                "${SIGN_FILE}" sha256 "${MOK_KEY}" "${MOK_CRT}" "${mod%.xz}"
-                xz -f "${mod%.xz}"
-                ;;
-            *.ko.zst)
-                zstd -qd --rm "${mod}"
-                "${SIGN_FILE}" sha256 "${MOK_KEY}" "${MOK_CRT}" "${mod%.zst}"
-                zstd -q -19 --rm -f "${mod%.zst}"
-                ;;
-            *.ko)
-                "${SIGN_FILE}" sha256 "${MOK_KEY}" "${MOK_CRT}" "${mod}"
-                ;;
-        esac
-    done < <(find "/usr/lib/modules/${KERNEL_VERSION}/extra" \
-                  \( -name '*.ko' -o -name '*.ko.xz' -o -name '*.ko.zst' \) -print0)
+    # Sign ONLY the modules dkms built for tuxedo-drivers — a blanket sweep
+    # of extra/ would also re-sign base-image modules (e.g. v4l2loopback)
+    # and override their original signer with ours.
+    DKMS_BUILT="/var/lib/dkms/tuxedo-drivers/${TD_VERSION}/${KERNEL_VERSION}/$(uname -m)/module"
+    if [ ! -d "${DKMS_BUILT}" ]; then
+        echo "ERROR: dkms module output dir not found: ${DKMS_BUILT}" >&2
+        exit 1
+    fi
+    for built in "${DKMS_BUILT}"/*.ko*; do
+        base="$(basename "${built}")"
+        base="${base%%.*}"
+        while IFS= read -r -d '' mod; do
+            # -f on xz/zstd: module files can be hard-linked; force breaks
+            # the link instead of aborting the build
+            case "${mod}" in
+                *.ko.xz)
+                    xz -df "${mod}"
+                    "${SIGN_FILE}" sha256 "${MOK_KEY}" "${MOK_CRT}" "${mod%.xz}"
+                    xz -f "${mod%.xz}"
+                    ;;
+                *.ko.zst)
+                    zstd -qdf --rm "${mod}"
+                    "${SIGN_FILE}" sha256 "${MOK_KEY}" "${MOK_CRT}" "${mod%.zst}"
+                    zstd -q -19 --rm -f "${mod%.zst}"
+                    ;;
+                *.ko)
+                    "${SIGN_FILE}" sha256 "${MOK_KEY}" "${MOK_CRT}" "${mod}"
+                    ;;
+            esac
+        done < <(find "/usr/lib/modules/${KERNEL_VERSION}/extra" -name "${base}.ko*" -print0)
+    done
 
     # Hard gate: the kernel must see our signature on tuxedo_io
     SIGNER="$(modinfo -k "${KERNEL_VERSION}" -F signer tuxedo_io 2>/dev/null || true)"

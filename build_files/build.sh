@@ -25,15 +25,16 @@ dnf5 -y copr enable gladion136/tuxedo-drivers-kmod
 # otherwise the modules get built for the wrong kernel.
 dnf5 -y install \
     "kernel-devel-${KERNEL_VERSION}" \
-    akmods \
-    tuxedo-drivers-kmod-common
+    akmods
 
 # The akmod package's %post scriptlet tries to build the module right away and
 # refuses to run as root, which fails the whole dnf transaction in a container
-# build. Install it without scriptlets, then trigger the build explicitly —
-# akmods drops privileges to its build user properly.
+# build. (tuxedo-drivers-kmod-common depends on the akmod package, so it must
+# not go through dnf either.) Download akmod + common, install both without
+# scriptlets, then trigger the build explicitly — akmods drops privileges to
+# its build user properly.
 dnf5 -y install --downloadonly --destdir=/tmp/akmod-rpms akmod-tuxedo-drivers
-rpm -ivh --noscripts /tmp/akmod-rpms/akmod-tuxedo-drivers*.rpm
+rpm -ivh --noscripts /tmp/akmod-rpms/*.rpm
 
 # Build the modules for the image kernel and install the resulting kmod RPM
 akmods --force --kernels "${KERNEL_VERSION}" --kmod tuxedo-drivers

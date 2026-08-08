@@ -26,7 +26,14 @@ dnf5 -y copr enable gladion136/tuxedo-drivers-kmod
 dnf5 -y install \
     "kernel-devel-${KERNEL_VERSION}" \
     akmods \
-    akmod-tuxedo-drivers
+    tuxedo-drivers-kmod-common
+
+# The akmod package's %post scriptlet tries to build the module right away and
+# refuses to run as root, which fails the whole dnf transaction in a container
+# build. Install it without scriptlets, then trigger the build explicitly —
+# akmods drops privileges to its build user properly.
+dnf5 -y install --downloadonly --destdir=/tmp/akmod-rpms akmod-tuxedo-drivers
+rpm -ivh --noscripts /tmp/akmod-rpms/akmod-tuxedo-drivers*.rpm
 
 # Build the modules for the image kernel and install the resulting kmod RPM
 akmods --force --kernels "${KERNEL_VERSION}" --kmod tuxedo-drivers
@@ -63,5 +70,6 @@ systemctl enable tccd-sleep.service
 # 3. Cleanup: drop kernel build tooling from the final image
 ###############################################################################
 
-dnf5 -y remove "kernel-devel-${KERNEL_VERSION}" akmods akmod-tuxedo-drivers || \
+rpm -e --noscripts akmod-tuxedo-drivers || true
+dnf5 -y remove "kernel-devel-${KERNEL_VERSION}" akmods || \
     echo "WARN: cleanup removal failed, continuing (image just carries extra packages)"

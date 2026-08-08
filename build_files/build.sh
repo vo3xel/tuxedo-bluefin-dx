@@ -11,45 +11,46 @@ KERNEL_VERSION="$(rpm -q kernel --queryformat '%{VERSION}-%{RELEASE}.%{ARCH}')"
 echo "Building for Fedora ${RELEASE}, kernel ${KERNEL_VERSION}"
 
 ###############################################################################
-# 1. TUXEDO kernel drivers (baked in as kmod, built at image build time)
+# 1. TUXEDO kernel drivers (baked in, built at image build time)
 #
-# Uses the akmod packaging from the gladion136/tuxedo-drivers-kmod COPR
-# (https://copr.fedorainfracloud.org/coprs/gladion136/tuxedo-drivers-kmod/)
-# instead of the official DKMS package — DKMS does not fit ostree images,
-# akmods lets us compile the modules here and ship them in the image.
+# Built from the OFFICIAL tuxedo-drivers dkms package — the only packaging
+# TUXEDO keeps current (the community akmod COPR lags behind and its 4.17.0
+# does not compile against kernel 7.x). dkms is only used as a build tool
+# here: the resulting .ko files are shipped in the image, nothing rebuilds
+# at runtime.
 ###############################################################################
-
-dnf5 -y copr enable gladion136/tuxedo-drivers-kmod
 
 # kernel-devel must match the kernel shipped in the base image exactly,
 # otherwise the modules get built for the wrong kernel.
-dnf5 -y install \
-    "kernel-devel-${KERNEL_VERSION}" \
-    akmods
+dnf5 -y install "kernel-devel-${KERNEL_VERSION}"
 
-# The akmod package's %post scriptlet tries to build the module right away and
-# refuses to run as root, which fails the whole dnf transaction in a container
-# build. (tuxedo-drivers-kmod-common depends on the akmod package, so it must
-# not go through dnf either.) Download akmod + common, install both without
-# scriptlets, then trigger the build explicitly — akmods drops privileges to
-# its build user properly.
-dnf5 -y download --destdir=/tmp/akmod-rpms --resolve akmod-tuxedo-drivers
-rpm -ivh --noscripts /tmp/akmod-rpms/*.rpm
+# tuxedo-drivers' %post runs a dkms build for `uname -r` (the BUILD HOST
+# kernel — wrong in a container). Install it and its missing deps (dkms,
+# udev-hid-bpf) without scriptlets, then build explicitly for the image
+# kernel below.
+dnf5 -y download --destdir=/tmp/td-rpms --resolve tuxedo-drivers
+rpm -ivh --noscripts /tmp/td-rpms/*.rpm
 
-# Build the modules for the image kernel and install the resulting kmod RPM
-akmods --force --kernels "${KERNEL_VERSION}" --kmod tuxedo-drivers
+TD_VERSION="$(rpm -q tuxedo-drivers --queryformat '%{VERSION}')"
+echo "Building tuxedo-drivers ${TD_VERSION} for kernel ${KERNEL_VERSION}"
 
-# Fail the build if the modules did not actually land in the image
-if ! find "/usr/lib/modules/${KERNEL_VERSION}" -name 'tuxedo*.ko*' | grep -q .; then
-    echo "ERROR: tuxedo kernel modules missing after akmods build" >&2
-    # akmods hides the real rpmbuild error in its logs — surface them
-    cat /var/cache/akmods/tuxedo-drivers/*.log >&2 || true
+dkms install -m tuxedo-drivers -v "${TD_VERSION}" -k "${KERNEL_VERSION}" || {
+    echo "ERROR: dkms build/install of tuxedo-drivers failed" >&2
+    cat "/var/lib/dkms/tuxedo-drivers/${TD_VERSION}/build/make.log" >&2 || true
+    exit 1
+}
+
+# Strict verification: tuxedo_io is part of the out-of-tree set only (newer
+# kernels ship SOME in-tree tuxedo_* modules, which must not mask a failed
+# driver build — this bit us with the akmod approach).
+echo "tuxedo modules now present in the image:"
+find "/usr/lib/modules/${KERNEL_VERSION}" -name '*tuxedo*'
+if ! find "/usr/lib/modules/${KERNEL_VERSION}" -name 'tuxedo_io.ko*' | grep -q .; then
+    echo "ERROR: tuxedo_io module missing — out-of-tree driver set did not install" >&2
     exit 1
 fi
 
 depmod -a "${KERNEL_VERSION}"
-
-dnf5 -y copr disable gladion136/tuxedo-drivers-kmod
 
 ###############################################################################
 # 2. TUXEDO Control Center (+ hardware extras) from the official TUXEDO repo
@@ -71,6 +72,9 @@ systemctl enable tccd-sleep.service
 # 3. Cleanup: drop kernel build tooling from the final image
 ###############################################################################
 
-rpm -e --noscripts akmod-tuxedo-drivers || true
-dnf5 -y remove "kernel-devel-${KERNEL_VERSION}" akmods || \
+# Only kernel-devel is removed: dkms stays because the tuxedo-drivers RPM
+# (udev rules, firmware configs, module sources) depends on it. The dkms
+# bookkeeping under /var/lib/dkms does not survive into the deployed system
+# anyway — the built modules live in /usr/lib/modules and do.
+dnf5 -y remove "kernel-devel-${KERNEL_VERSION}" || \
     echo "WARN: cleanup removal failed, continuing (image just carries extra packages)"

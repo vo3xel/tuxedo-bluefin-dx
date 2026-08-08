@@ -9,10 +9,9 @@ Based on the [ublue-os/image-template](https://github.com/ublue-os/image-templat
 ## What's inside
 
 - **Base:** `ghcr.io/ublue-os/bluefin-dx:stable`
-- **Kernel modules:** `tuxedo-drivers` (tuxedo_keyboard, tuxedo_io, fan/EC control, …) compiled
-  at image build time against the exact image kernel via
-  [akmod packaging](https://copr.fedorainfracloud.org/coprs/gladion136/tuxedo-drivers-kmod/) —
-  no DKMS at runtime, the modules ship in the image
+- **Kernel modules:** the official `tuxedo-drivers` dkms package (tuxedo_keyboard, tuxedo_io,
+  fan/EC control, …) compiled at image build time against the exact image kernel — dkms is only
+  a build tool here, nothing rebuilds at runtime, the modules ship in the image
 - **TUXEDO Control Center** (`tccd` + `tccd-sleep` enabled) from the
   [official TUXEDO Fedora repo](https://rpm.tuxedocomputers.com/), installed to a real
   (immutable) `/opt` so it survives bootc deployments

@@ -66,6 +66,20 @@ jobs:
           echo "IMAGE_REGISTRY=${IMAGE_REGISTRY,,}" >> ${GITHUB_ENV}
           echo "IMAGE_NAME=${IMAGE_NAME,,}" >> ${GITHUB_ENV}
 
+      # Drop the MOK module-signing key into the build context (build_files/
+      # is only bind-mounted into the build, never copied into image layers).
+      # Skipped when the secret is absent (PRs, forks) — modules stay unsigned.
+      - name: Prepare MOK signing key
+        env:
+          MOK_PRIVATE_KEY: ${{ secrets.MOK_PRIVATE_KEY }}
+        run: |
+          if [ -n "${MOK_PRIVATE_KEY}" ]; then
+            printf '%s\n' "${MOK_PRIVATE_KEY}" > build_files/mok/mok.key
+            echo "MOK key staged for module signing"
+          else
+            echo "::warning::MOK_PRIVATE_KEY not set - kernel modules will be unsigned (Secure Boot requires enrollment of a signing key). See README."
+          fi
+
       # This actually builds the container image
       # On failure, the tail of the build log is published to the run summary
       # (visible without authentication) to make CI failures diagnosable.

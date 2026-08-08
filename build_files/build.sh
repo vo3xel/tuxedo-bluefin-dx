@@ -53,6 +53,54 @@ if ! find "/usr/lib/modules/${KERNEL_VERSION}" -name 'tuxedo_io.ko*' | grep -q .
     exit 1
 fi
 
+###############################################################################
+# 1b. Secure Boot: sign the built modules with the project MOK
+#
+# CI drops the private key (MOK_PRIVATE_KEY secret) into build_files/mok/,
+# which only exists in the /ctx build mount — it never enters image layers.
+# Users enroll the matching public cert once: see README. Without the key
+# (local builds, forks) modules stay unsigned and only load with SB off.
+###############################################################################
+
+MOK_KEY="/ctx/mok/mok.key"
+MOK_CRT="/ctx/mok/mok.pem"
+SIGN_FILE="/usr/src/kernels/${KERNEL_VERSION}/scripts/sign-file"
+
+# Bake the public cert into the image so it can be enrolled on the machine
+install -Dm644 /ctx/mok/mok.der /usr/share/tuxedo-bluefin-dx/mok.der
+
+if [ -f "${MOK_KEY}" ]; then
+    echo "Signing tuxedo modules with project MOK"
+    while IFS= read -r -d '' mod; do
+        case "${mod}" in
+            *.ko.xz)
+                xz -d "${mod}"
+                "${SIGN_FILE}" sha256 "${MOK_KEY}" "${MOK_CRT}" "${mod%.xz}"
+                xz -f "${mod%.xz}"
+                ;;
+            *.ko.zst)
+                zstd -qd --rm "${mod}"
+                "${SIGN_FILE}" sha256 "${MOK_KEY}" "${MOK_CRT}" "${mod%.zst}"
+                zstd -q -19 --rm -f "${mod%.zst}"
+                ;;
+            *.ko)
+                "${SIGN_FILE}" sha256 "${MOK_KEY}" "${MOK_CRT}" "${mod}"
+                ;;
+        esac
+    done < <(find "/usr/lib/modules/${KERNEL_VERSION}/extra" \
+                  \( -name '*.ko' -o -name '*.ko.xz' -o -name '*.ko.zst' \) -print0)
+
+    # Hard gate: the kernel must see our signature on tuxedo_io
+    SIGNER="$(modinfo -k "${KERNEL_VERSION}" -F signer tuxedo_io 2>/dev/null || true)"
+    echo "tuxedo_io signer: ${SIGNER:-<none>}"
+    if [ "${SIGNER}" != "tuxedo-bluefin-dx Secure Boot MOK" ]; then
+        echo "ERROR: tuxedo_io is not signed with the project MOK" >&2
+        exit 1
+    fi
+else
+    echo "WARN: no MOK private key provided — modules will be UNSIGNED (Secure Boot must be disabled)"
+fi
+
 depmod -a "${KERNEL_VERSION}"
 
 ###############################################################################

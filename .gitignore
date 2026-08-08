@@ -4,3 +4,7 @@ _build_*
 output
 _build-*/**
 *_chunkah_*
+
+# MOK module-signing key (private; the cert in build_files/mok/ is public)
+mok.key
+build_files/mok/mok.key

@@ -34,16 +34,39 @@ sudo bootc switch ghcr.io/ublue-os/bluefin-dx:stable
 An anaconda ISO / qcow2 can be built with the **Build disk images** workflow
 (Actions → Build disk images → Run workflow) or locally with `just build-iso`.
 
-## ⚠️ Secure Boot
+## Secure Boot
 
-The TUXEDO kernel modules built into this image are **not signed**. With Secure Boot enabled
-the kernel will refuse to load them. Options:
+The TUXEDO kernel modules are **signed at build time** with this project's MOK
+(Machine Owner Key) when the `MOK_PRIVATE_KEY` secret is configured. To use them with
+Secure Boot enabled, enroll the public certificate **once** on the machine:
 
-1. Disable Secure Boot in firmware (TUXEDO ships many devices this way), or
-2. Module signing with your own MOK — not implemented yet (contributions welcome)
+```bash
+sudo mokutil --import /usr/share/tuxedo-bluefin-dx/mok.der
+```
 
-Everything else in the image works fine with Secure Boot on; only the tuxedo_* modules
-(keyboard backlight, fan control, TCC hardware access) would be unavailable.
+Set a one-time password when prompted, reboot, and in the blue **MOK Manager** screen
+choose *Enroll MOK* → *Continue* and enter that password. After the reboot the tuxedo
+modules load with Secure Boot on (`modinfo -F signer tuxedo_io` shows the project MOK).
+
+No enrollment (or builds without the signing secret) → the modules only load with
+Secure Boot disabled. Everything else in the image works under Secure Boot either way.
+
+### MOK setup for forks
+
+```bash
+openssl req -x509 -new -newkey rsa:2048 -nodes -keyout mok.key \
+  -out build_files/mok/mok.pem -days 36500 \
+  -subj "/CN=<your image> Secure Boot MOK" \
+  -addext "basicConstraints=critical,CA:FALSE" \
+  -addext "keyUsage=digitalSignature" \
+  -addext "extendedKeyUsage=codeSigning"
+openssl x509 -in build_files/mok/mok.pem -outform DER -out build_files/mok/mok.der
+```
+
+Add `mok.key` contents as the `MOK_PRIVATE_KEY` Actions secret, commit the two
+certificate files, never commit `mok.key` (it is in `.gitignore`). The build fails if the
+key is present but signing does not verify. NOTE: the signer CN is verified in
+`build_files/build.sh` — adjust the expected string there if you change the CN.
 
 ## CI setup (once, for forks)
 

@@ -33,7 +33,7 @@ dnf5 -y install \
 # not go through dnf either.) Download akmod + common, install both without
 # scriptlets, then trigger the build explicitly — akmods drops privileges to
 # its build user properly.
-dnf5 -y install --downloadonly --destdir=/tmp/akmod-rpms akmod-tuxedo-drivers
+dnf5 -y download --destdir=/tmp/akmod-rpms --resolve akmod-tuxedo-drivers
 rpm -ivh --noscripts /tmp/akmod-rpms/*.rpm
 
 # Build the modules for the image kernel and install the resulting kmod RPM

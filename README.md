@@ -89,7 +89,7 @@ key is present but signing does not verify. NOTE: the signer CN is verified in
 | Path | Purpose |
 | --- | --- |
 | `Containerfile` | Base image selection + immutable `/opt` + runs `build.sh` |
-| `build_files/build.sh` | Driver build (akmods), TCC install, service enablement |
+| `build_files/build.sh` | Driver build (dkms) + MOK signing, TCC install, service enablement |
 | `system_files/` | Files copied verbatim into `/` (TUXEDO yum repo definition) |
 | `.github/workflows/build.yml` | Build, rechunk, push to GHCR, sign — on push, PR, and nightly |
 | `.github/workflows/build-disk.yml` | ISO/qcow2 disk images via bootc-image-builder |
